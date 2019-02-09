@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import sys
-import MeCab
-import re
-import jaconv
 import unicodedata
+
+import MeCab
+import jaconv
 
 
 def is_kanji(ch):
-    return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(ch)
+    return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(ch) or ch in ['々', 'ヵ', 'ヶ']
 
 
 def is_hiragana(ch):
@@ -16,7 +16,7 @@ def is_hiragana(ch):
 
 
 def split_okurigana_reverse(text, hiragana):
-    """ 
+    """
       tested:
         お茶(おちゃ)
         ご無沙汰(ごぶさた)
@@ -28,7 +28,7 @@ def split_okurigana_reverse(text, hiragana):
 
 def split_okurigana(text, hiragana):
     """ 送り仮名 processing
-      tested: 
+      tested:
          * 出会(であ)う
          * 明(あか)るい
          * 駆(か)け抜(ぬ)け
@@ -38,40 +38,20 @@ def split_okurigana(text, hiragana):
     if all(is_kanji(_) for _ in text):
         yield text, hiragana
         return
-    text = list(text)
-    ret = (text[0], [hiragana[0]])
-    for hira in hiragana[1:]:
-        for char in text:
-            if hira == char:
-                text.pop(0)
-                if ret[0]:
-                    if is_kanji(ret[0]):
-                        yield ret[0], ''.join(ret[1][:-1])
-                        yield (ret[1][-1],)
-                    else:
-                        yield (ret[0],)
-                else:
-                    yield (hira,)
-                ret = ('', [])
-                if text and text[0] == hira:
-                    text.pop(0)
-                break
-            else:
-                if is_kanji(char):
-                    if ret[1] and hira == ret[1][-1]:
-                        text.pop(0)
-                        yield ret[0], ''.join(ret[1][:-1])
-                        yield char, hira
-                        ret = ('', [])
-                        text.pop(0)
-                    else:
-                        ret = (char, ret[1]+[hira])
-                else:
-                    # char is also hiragana
-                    if hira != char:
-                        break
-                    else:
-                        break
+    if not hiragana:
+        return
+    if not is_kanji(text[0]) and text[0] == hiragana[0]:
+        return
+    huri = ''
+    gana = hiragana
+    while gana:
+        pos = text.find(gana)
+        if pos > -1:
+            yield text[:pos], huri
+            yield (gana,)
+            break
+        huri += gana[0]
+        gana = gana[1:]
 
 
 def split_furigana(text):
@@ -88,14 +68,28 @@ def split_furigana(text):
     ret = []
 
     while node is not None:
+        # 시작/끝(BOS/EOS) 노드일 경우 넘어감 (비었음)
+        if node.stat in (2, 3):
+            node = node.next
+            continue
         origin = node.surface # もとの単語を代入
         if not origin:
             node = node.next
             continue
 
+        # 형태소 분리
+        # 전달되는 node.length는 byte 단위임
+        # UTF-8 문자일 경우 3bytes, ASCII는 1byte 씩 카운트됨
+        origin = origin.encode('utf-8')[:node.length].decode('utf-8')
+
         # originが空のとき、漢字以外の時はふりがなを振る必要がないのでそのまま出力する
         if origin != "" and any(is_kanji(_) for _ in origin):
-            kana = node.feature.split(",")[7] # 読み仮名を代入
+            # 조회 가능한 한자어, 히라가나로 대치 가능한 문자일 경우
+            if len(node.feature.split(",")) > 7:
+                kana = node.feature.split(",")[7] # 読み仮名を代入
+            # 영숫자, 특수문자, 카타카나, 고유명사 등
+            else:
+                kana = origin
             hiragana = jaconv.kata2hira(kana)
             for pair in split_okurigana(origin, hiragana):
                 ret += [pair]
@@ -121,7 +115,7 @@ def print_plaintext(text):
     for pair in split_furigana(text):
         if len(pair)==2:
             kanji,hira = pair
-            print("%s(%s)" % (kanja,hira), end='')
+            print("%s(%s)" % (kanji,hira), end='')
         else:
             print(pair[0], end='')
     print('')
@@ -134,4 +128,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
