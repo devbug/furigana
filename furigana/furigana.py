@@ -62,6 +62,83 @@ def split_okurigana(text, hiragana):
         gana = gana[1:]
 
 
+def is_mixed_japanese(text):
+    found_hiragana = False
+    found_kanji_after_hiragana = False
+    for i, char in enumerate(text):
+        if i != 0 and not found_hiragana and not is_kanji(char):
+            found_hiragana = True
+            continue
+        if found_hiragana and is_kanji(char):
+            found_kanji_after_hiragana = True
+            break
+    return found_kanji_after_hiragana
+
+
+def split_furigana_nbest(text):
+    model = MeCab.Model()
+    tagger = model.createTagger()
+    lattice = model.createLattice()
+    lattice.set_request_type(MeCab.MECAB_NBEST)
+    lattice.set_sentence(text)
+    tagger.parse(lattice)
+    ret = []
+
+    found_best = False
+
+    for _ in range(10):
+        node = lattice.bos_node()
+
+        while node:
+            if node.stat in (2, 3):
+                if node.stat == 3: # EOS
+                    found_best = True
+                    break
+                node = node.next
+                continue
+            origin = node.surface
+            if not origin:
+                node = node.next
+                continue
+
+            origin = origin.encode('utf-8')[:node.length].decode('utf-8')
+            if is_mixed_japanese(origin):
+                break
+
+            node = node.next
+
+        if found_best:
+            node = lattice.bos_node()
+            while node:
+                if node.stat in (2, 3):
+                    node = node.next
+                    continue
+                origin = node.surface
+                if not origin:
+                    node = node.next
+                    continue
+
+                origin = origin.encode('utf-8')[:node.length].decode('utf-8')
+
+                if origin != "" and any(is_kanji(_) for _ in origin):
+                    if len(node.feature.split(",")) > 7:
+                        kana = node.feature.split(",")[7]
+                    else:
+                        kana = origin
+                    hiragana = jaconv.kata2hira(kana)
+                    for pair in split_okurigana(origin, hiragana):
+                        ret += [pair]
+                else:
+                    if origin:
+                        ret += [(origin,)]
+                node = node.next
+            break
+
+        if not lattice.next():
+            break
+    return ret
+
+
 def split_furigana(text):
     """ MeCab has a problem if used inside a generator ( use yield instead of return  )
     The error message is:
@@ -90,8 +167,10 @@ def split_furigana(text):
         # UTF-8 문자일 경우 3bytes, ASCII는 1byte 씩 카운트됨
         origin = origin.encode('utf-8')[:node.length].decode('utf-8')
 
+        if origin and is_mixed_japanese(origin):
+            ret.extend(split_furigana_nbest(origin))
         # originが空のとき、漢字以外の時はふりがなを振る必要がないのでそのまま出力する
-        if origin != "" and any(is_kanji(_) for _ in origin):
+        elif origin != "" and any(is_kanji(_) for _ in origin):
             # 조회 가능한 한자어, 히라가나로 대치 가능한 문자일 경우
             if len(node.feature.split(",")) > 7:
                 kana = node.feature.split(",")[7] # 読み仮名を代入
