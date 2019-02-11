@@ -8,11 +8,19 @@ import jaconv
 
 
 def is_kanji(ch):
-    return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(ch) or ch in ['々', 'ヵ', 'ヶ']
+    try:
+        return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(ch) or ch in ['々', 'ヵ', 'ヶ']
+    except:
+        pass
+    return False
 
 
 def is_hiragana(ch):
-    return 'HIRAGANA' in unicodedata.name(ch)
+    try:
+        return 'HIRAGANA' in unicodedata.name(ch)
+    except:
+        pass
+    return False
 
 
 def split_okurigana_reverse(text, hiragana):
